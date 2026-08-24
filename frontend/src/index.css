@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Sin esto, en algunos navegadores/zooms 'h-screen' (100vh) del layout no
+   se comporta de forma confiable y toda la página (en vez de solo el
+   contenido interno de cada sección) termina desplazándose como una sola
+   pieza — eso hacía que el Sidebar pareciera "cortarse" y que
+   Configuración quedara flotando sobre fondo blanco. Fijar la altura de
+   html/body/#root a 100% y bloquear el scroll del body obliga a que el
+   desplazamiento ocurra solo dentro de los contenedores que sí lo
+   declaran explícitamente (el <main> del contenido y el <nav> del menú). */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
