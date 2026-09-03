@@ -262,3 +262,72 @@ total, todas pasando.
 proyecto.** Lo único que sigue pendiente de listas anteriores es lo que ya
 se había marcado como fuera de alcance (código de barras/QR,
 Compras/Ventas/Clientes) o menor (edición de perfil de usuario, backups).
+
+## Ronda de hallazgos de seguridad adicionales — cerrada
+
+Tras una comparación con listas de buenas prácticas de seguridad para
+aplicaciones web, se identificaron y resolvieron tres hallazgos reales:
+
+### 1. Token en cookie httpOnly (antes: localStorage)
+
+El JWT ya no se guarda en `localStorage` (legible por cualquier script que
+corra en la página) — ahora viaja en una cookie `httpOnly` que JavaScript
+no puede leer. Se agregó protección CSRF (patrón "doble envío"): el login
+también entrega una cookie `csrfToken` legible, que el frontend reenvía en
+el header `X-CSRF-Token` en cada petición que modifica datos; el backend
+rechaza la petición si el header no coincide con la cookie.
+
+- Nuevo: `POST /api/auth/logout` (borra las cookies del lado del servidor).
+- `verifyToken` acepta la cookie **o** el header `Authorization` (este
+  último se mantiene solo para no reescribir toda la suite de pruebas).
+- CORS ahora usa `credentials: true` y permite el header `X-CSRF-Token`.
+
+### 2. IDs predecibles → UUID
+
+`usuarios`, `categorias`, `proveedores`, `movimientos` y `auditoria` pasaron
+de `SERIAL` (1, 2, 3...) a `UUID` generado con `gen_random_uuid()`.
+`productos.id` no cambió: ya usa un código de negocio (SKU) no secuencial,
+nunca tuvo este problema. Se revisó todo el código y ningún lugar hacía
+aritmética con los IDs (siempre se tratan como texto opaco), así que el
+cambio no rompió nada — confirmado con la suite de pruebas.
+
+### 3. Precio protegido también a nivel de base de datos
+
+La regla "solo Administrador cambia el precio" ya se validaba en el
+backend. Ahora además se refuerza con **seguridad a nivel de columna en
+PostgreSQL**: el rol `ferrecontrol_vendedor` (definido en `schema.sql`)
+tiene revocado el permiso de escritura sobre `productos.precio_venta`. El
+`PUT /api/productos/:id` corre bajo ese rol restringido (`SET LOCAL ROLE`
+dentro de una transacción) para cualquier usuario que no sea
+Administrador — así, aunque un error de programación futuro reintrodujera
+`precio_venta` en el `UPDATE` para un Vendedor, la base de datos lo
+rechazaría de todas formas, no solo el código de la aplicación.
+
+**Nota honesta sobre alcance:** se evaluó implementar Row-Level Security
+(RLS) tal como se pedía originalmente, pero RLS filtra *filas* visibles
+por usuario — no es la herramienta correcta para una regla sobre qué
+*columna* puede escribir cada rol (que es nuestro caso). Se implementó el
+equivalente correcto (seguridad de columna) en su lugar, con la
+justificación documentada aquí para quien pregunte por qué no se ve
+`ENABLE ROW LEVEL SECURITY` en el script.
+
+Las 30 pruebas automatizadas se actualizaron para reflejar el nuevo flujo
+transaccional del Vendedor y siguen pasando en su totalidad.
+
+## Usuarios: edición y eliminación — vacío real cerrado
+
+Se detectó (al revisar la vista Usuarios) que solo existía crear y listar
+usuarios — nunca se implementó editar ni eliminar. Se agregó:
+
+- `PUT /api/usuarios/:id` (Administrador) — edita nombre, correo, rol y
+  estado. No toca la contraseña (eso sigue siendo exclusivo de
+  "Configuración > Cambiar contraseña", cada quien la suya).
+- `DELETE /api/usuarios/:id` (Administrador) — con dos protecciones: nadie
+  puede eliminar su propia cuenta mientras tiene la sesión iniciada, y si
+  el usuario tiene movimientos o registros de auditoría asociados, la base
+  de datos rechaza el borrado (se protege el historial).
+- Frontend: botones de editar/eliminar en la tabla de Usuarios; el botón
+  de eliminar no aparece en la fila del usuario que tiene la sesión activa.
+
+8 pruebas nuevas en `tests/usuarios.test.js` — 38 pruebas en total, todas
+pasando.

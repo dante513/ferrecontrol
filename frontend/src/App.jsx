@@ -14,7 +14,7 @@ import { Users } from './views/Users';
 import { Settings } from './views/Settings';
 import { ProductForm } from './components/inventory/ProductForm';
 import { StatusAlert } from './components/ui/Alert';
-import { api, getToken, clearToken } from './api/client';
+import { api } from './api/client';
 
 export default function App() {
   const [user, setUser] = useState(null); // { id, nombre, email, rol }
@@ -52,17 +52,19 @@ export default function App() {
     };
   }, []);
 
-  // Al cargar la app, si ya existe un token guardado, se valida contra el
-  // backend en vez de pedir login de nuevo cada vez que se recarga la página.
+  // Al cargar la app, se intenta validar la sesión contra el backend. Como
+  // el token ahora vive en una cookie httpOnly, el frontend ya no puede
+  // "revisar" si existe antes de preguntar — simplemente se intenta, y si
+  // no hay cookie válida, el backend responde con error y quedamos en el
+  // login, igual que antes.
   useEffect(() => {
     const restoreSession = async () => {
-      if (getToken()) {
-        try {
-          const { usuario } = await api.me();
-          setUser(usuario);
-        } catch {
-          clearToken(); // token vencido o inválido
-        }
+      try {
+        const { usuario } = await api.me();
+        setUser(usuario);
+      } catch {
+        // sin sesión válida — se queda en el login, nada que limpiar en el
+        // cliente (las cookies las maneja el navegador, no nuestro JS)
       }
       setCheckingSession(false);
     };
@@ -73,8 +75,12 @@ export default function App() {
     setUser(usuario); // { id, nombre, email, rol } — ya viene verificado por el backend
   };
 
-  const handleLogout = () => {
-    clearToken();
+  const handleLogout = async () => {
+    try {
+      await api.logout(); // borra las cookies del lado del servidor
+    } catch {
+      // si falla la llamada, igual sacamos al usuario de la vista
+    }
     setUser(null);
     setActiveView('dashboard');
   };
@@ -138,7 +144,7 @@ export default function App() {
               {activeView === 'categorias' && <Categories isDarkMode={isDarkMode} />}
               {activeView === 'proveedores' && <Providers isDarkMode={isDarkMode} />}
               {activeView === 'reportes' && <Reports isDarkMode={isDarkMode} />}
-              {activeView === 'usuarios' && <Users isDarkMode={isDarkMode} />}
+              {activeView === 'usuarios' && <Users isDarkMode={isDarkMode} currentUserId={user.id} />}
               {activeView === 'auditoria' && <Audit isDarkMode={isDarkMode} />}
             </>
           )}

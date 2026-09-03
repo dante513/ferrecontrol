@@ -28,6 +28,7 @@ describe('POST /api/movimientos', () => {
     const res = await request(app)
       .post('/api/movimientos')
       .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', 'csrfToken=test-csrf').set('X-CSRF-Token', 'test-csrf')
       .send({ tipo_movimiento: 'Entrada' }); // falta producto_id y cantidad
 
     expect(res.status).toBe(400);
@@ -38,6 +39,7 @@ describe('POST /api/movimientos', () => {
     const res = await request(app)
       .post('/api/movimientos')
       .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', 'csrfToken=test-csrf').set('X-CSRF-Token', 'test-csrf')
       .send({ producto_id: 'FER-001', tipo_movimiento: 'Salida', cantidad: -5 });
 
     expect(res.status).toBe(400);
@@ -52,6 +54,7 @@ describe('POST /api/movimientos', () => {
     const res = await request(app)
       .post('/api/movimientos')
       .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', 'csrfToken=test-csrf').set('X-CSRF-Token', 'test-csrf')
       .send({ producto_id: 'FER-001', tipo_movimiento: 'Salida', cantidad: 10 });
 
     expect(res.status).toBe(400);
@@ -74,6 +77,7 @@ describe('POST /api/movimientos', () => {
     const res = await request(app)
       .post('/api/movimientos')
       .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', 'csrfToken=test-csrf').set('X-CSRF-Token', 'test-csrf')
       .send({ producto_id: 'FER-001', tipo_movimiento: 'Entrada', cantidad: 20, motivo: 'Compra a proveedor' });
 
     expect(res.status).toBe(201);
@@ -93,6 +97,7 @@ describe('POST /api/movimientos', () => {
     const res = await request(app)
       .post('/api/movimientos')
       .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', 'csrfToken=test-csrf').set('X-CSRF-Token', 'test-csrf')
       .send({ producto_id: 'FER-001', tipo_movimiento: 'Salida', cantidad: 5 });
 
     expect(res.status).toBe(201);

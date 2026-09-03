@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, ShieldAlert, User, UserPlus, Download } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, User, UserPlus, Download, Edit, Trash2 } from 'lucide-react';
 import { StatusAlert } from '../components/ui/Alert';
 import { UserForm } from '../components/users/UserForm';
 import { api } from '../api/client';
 import { exportToExcel } from '../utils/exportExcel';
 
-export const Users = ({ isDarkMode }) => {
+export const Users = ({ isDarkMode, currentUserId }) => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [alert, setAlert] = useState(null);
 
   const loadUsers = () => {
@@ -26,6 +27,28 @@ export const Users = ({ isDarkMode }) => {
       await api.postUsuario(data);
       setShowForm(false);
       setAlert({ type: 'success', message: 'Usuario creado correctamente' });
+      loadUsers();
+    } catch (err) {
+      setAlert({ type: 'error', message: err.message });
+    }
+  };
+
+  const handleUpdate = async (data) => {
+    try {
+      await api.putUsuario(editingUser.id, data);
+      setEditingUser(null);
+      setAlert({ type: 'success', message: 'Usuario actualizado correctamente' });
+      loadUsers();
+    } catch (err) {
+      setAlert({ type: 'error', message: err.message });
+    }
+  };
+
+  const handleDelete = async (user) => {
+    if (!window.confirm(`¿Eliminar a "${user.nombre}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api.deleteUsuario(user.id);
+      setAlert({ type: 'success', message: 'Usuario eliminado correctamente' });
       loadUsers();
     } catch (err) {
       setAlert({ type: 'error', message: err.message });
@@ -67,9 +90,14 @@ export const Users = ({ isDarkMode }) => {
         </div>
       </div>
 
-      {showForm && (
+      {(showForm || editingUser) && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <UserForm onSave={handleSave} onCancel={() => setShowForm(false)} isDarkMode={isDarkMode} />
+          <UserForm
+            initialData={editingUser}
+            onSave={editingUser ? handleUpdate : handleSave}
+            onCancel={() => { setShowForm(false); setEditingUser(null); }}
+            isDarkMode={isDarkMode}
+          />
         </div>
       )}
 
@@ -80,11 +108,12 @@ export const Users = ({ isDarkMode }) => {
               <th scope="col" className="px-6 py-4">Usuario</th>
               <th scope="col" className="px-6 py-4">Rol</th>
               <th scope="col" className="px-6 py-4">Estado</th>
+              <th scope="col" className="px-6 py-4 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y dark:divide-slate-800">
             {loading && (
-              <tr><td colSpan={3} className="px-6 py-8 text-center text-gray-500">Cargando usuarios...</td></tr>
+              <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-500">Cargando usuarios...</td></tr>
             )}
             {!loading && users.map((user) => (
               <tr key={user.id} className={isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-gray-50'}>
@@ -94,7 +123,9 @@ export const Users = ({ isDarkMode }) => {
                       <User className="w-5 h-5 text-slate-500" aria-hidden="true" />
                     </div>
                     <div>
-                      <p className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{user.nombre}</p>
+                      <p className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                        {user.nombre} {user.id === currentUserId && <span className="text-xs font-normal text-gray-400">(tú)</span>}
+                      </p>
                       <p className="text-xs text-gray-500">{user.email}</p>
                     </div>
                   </div>
@@ -109,6 +140,19 @@ export const Users = ({ isDarkMode }) => {
                   <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${user.estado === 'Activo' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {user.estado}
                   </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setEditingUser(user)} title="Editar" aria-label={`Editar ${user.nombre}`} className="p-1.5 rounded text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30">
+                      <Edit className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                    {/* Nadie puede eliminar su propia cuenta mientras tiene la sesión abierta — el botón ni se muestra en esa fila. */}
+                    {user.id !== currentUserId && (
+                      <button onClick={() => handleDelete(user)} title="Eliminar" aria-label={`Eliminar ${user.nombre}`} className="p-1.5 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30">
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

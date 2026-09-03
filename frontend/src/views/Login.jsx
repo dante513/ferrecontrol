@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Mail, Lock, Sun, Moon, WifiOff } from 'lucide-react';
 import { BrandLogo } from '../components/ui/BrandLogo';
 import { StatusAlert } from '../components/ui/Alert';
-import { api, setToken } from '../api/client';
+import { api } from '../api/client';
 
 export const Login = ({ onLogin, isDarkMode, setIsDarkMode, effectivelyOffline }) => {
   const [email, setEmail] = useState('');
@@ -21,8 +21,10 @@ export const Login = ({ onLogin, isDarkMode, setIsDarkMode, effectivelyOffline }
 
     setLoading(true);
     try {
-      const { token, usuario } = await api.login(email, password);
-      setToken(token);
+      // El backend responde con { usuario } y deja la sesión puesta en
+      // cookies (httpOnly para el token, legible para el CSRF) — ya no hay
+      // nada que guardar manualmente desde aquí.
+      const { usuario } = await api.login(email, password);
       onLogin(usuario);
     } catch (err) {
       setError(err.message || 'Credenciales incorrectas. Verifica tu correo y contraseña.');

@@ -6,12 +6,14 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 require('dotenv').config();
-const { verifyToken, requireRole } = require('./middleware/auth');
+const { verifyToken, requireRole, verifyCsrf } = require('./middleware/auth');
 const { registrarAuditoria } = require('./middleware/audit');
 
 const app = express();
@@ -28,9 +30,12 @@ app.use(cors({
     // en vez de dejarlo abierto en silencio.
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    credentials: true, // necesario para que el navegador mande/reciba las cookies de sesión
 }));
 app.use(express.json());
+app.use(cookieParser());
+app.use(verifyCsrf);
 
 // Límite general para toda la API (protege contra scraping o abuso masivo
 // con un token válido): 300 peticiones cada 15 minutos, por IP.
@@ -111,14 +116,38 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
             ip: req.ip,
         });
 
+        // El token va en una cookie httpOnly: JavaScript no puede leerla
+        // (ni siquiera con document.cookie), así que un ataque XSS no
+        // podría robarla como sí podía con localStorage.
+        const cookieOpts = {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 8 * 60 * 60 * 1000, // 8 horas, igual que la expiración del JWT
+        };
+        res.cookie('token', token, cookieOpts);
+
+        // El valor CSRF sí debe poder leerlo el frontend (para reenviarlo en
+        // un header), así que esta cookie NO es httpOnly.
+        const csrfToken = crypto.randomBytes(24).toString('hex');
+        res.cookie('csrfToken', csrfToken, { ...cookieOpts, httpOnly: false });
+
         res.json({
-            token,
             usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol }
         });
     } catch (error) {
         console.error('Error en login:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
+});
+
+// Cierra la sesión de verdad en el servidor (antes solo se borraba el token
+// del localStorage en el navegador, sin invalidar nada del lado del cliente
+// que él mismo controlara). Aquí simplemente se limpian las cookies.
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie('token');
+    res.clearCookie('csrfToken');
+    res.json({ mensaje: 'Sesión cerrada correctamente.' });
 });
 
 // Ruta para que el frontend valide si el token sigue vigente al recargar la página
@@ -322,50 +351,80 @@ app.put('/api/productos/:id', verifyToken, async (req, res) => {
         return res.status(400).json({ error: 'El nombre es obligatorio' });
     }
 
-    try {
-        // Regla de negocio: el precio solo lo cambia quien tenga
-        // autorización para parametrizar el sistema (Administrador). Un
-        // Vendedor/auxiliar puede editar el resto de los datos del
-        // producto, pero el precio se ignora silenciosamente si lo manda
-        // alguien sin ese rol — y se conserva el que ya tenía en la BD.
-        // Esto se valida aquí, no solo en el frontend: si alguien llamara
-        // a la API directamente (sin pasar por la interfaz), igual no
-        // podría colarse un cambio de precio sin el rol correcto.
-        let precioFinal;
-        if (req.user.rol === 'Administrador') {
-            if (!precio_venta || Number(precio_venta) <= 0) {
-                return res.status(400).json({ error: 'El precio debe ser mayor a 0' });
-            }
-            precioFinal = precio_venta;
-        } else {
-            const actual = await db.query('SELECT precio_venta FROM productos WHERE id = $1', [req.params.id]);
-            if (actual.rows.length === 0) {
+    // Regla de negocio: el precio solo lo cambia quien tenga autorización
+    // para parametrizar el sistema (Administrador). Esto ya se validaba
+    // antes solo en la aplicación (Node.js). Ahora se refuerza TAMBIÉN a
+    // nivel de base de datos: para cualquier rol distinto de Administrador,
+    // la actualización corre bajo el rol restringido de PostgreSQL
+    // 'ferrecontrol_vendedor' (ver database/schema.sql), al que se le
+    // revocó el permiso de escritura sobre la columna precio_venta. Así,
+    // aunque un error de programación futuro volviera a incluir esa
+    // columna en el UPDATE para un Vendedor, la propia base de datos
+    // rechazaría el cambio — no depende solo de que el código de arriba
+    // siga siendo correcto.
+    if (req.user.rol === 'Administrador') {
+        if (!precio_venta || Number(precio_venta) <= 0) {
+            return res.status(400).json({ error: 'El precio debe ser mayor a 0' });
+        }
+        try {
+            const result = await db.query(`
+                UPDATE productos
+                SET nombre = $1, categoria_id = $2, proveedor_id = $3, unidad_medida = $4,
+                    precio_venta = $5, ubicacion = $6, stock_minimo = $7,
+                    estado = CASE
+                        WHEN stock_actual <= 0 THEN 'Agotado'
+                        WHEN stock_actual <= $7 THEN 'Stock Bajo'
+                        ELSE 'Óptimo'
+                    END
+                WHERE id = $8
+                RETURNING *
+            `, [nombre, categoria_id || null, proveedor_id || null, unidad_medida, precio_venta, ubicacion, stock_minimo || 5, req.params.id]);
+
+            if (result.rows.length === 0) {
                 return res.status(404).json({ error: 'Producto no encontrado' });
             }
-            precioFinal = actual.rows[0].precio_venta;
+            registrarAuditoria(db, { usuario_id: req.user.id, accion: 'Editó', entidad: 'Producto', entidad_id: req.params.id, detalle: nombre, ip: req.ip });
+            return res.json(result.rows[0]);
+        } catch (error) {
+            console.error('Error al editar producto:', error);
+            return res.status(500).json({ error: 'Error al editar el producto' });
         }
+    }
 
-        const result = await db.query(`
+    // Cualquier rol que no sea Administrador: transacción bajo el rol
+    // restringido de PostgreSQL. precio_venta NUNCA aparece en este SQL.
+    const client = await db.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('SET LOCAL ROLE ferrecontrol_vendedor');
+
+        const result = await client.query(`
             UPDATE productos
             SET nombre = $1, categoria_id = $2, proveedor_id = $3, unidad_medida = $4,
-                precio_venta = $5, ubicacion = $6, stock_minimo = $7,
+                ubicacion = $5, stock_minimo = $6,
                 estado = CASE
                     WHEN stock_actual <= 0 THEN 'Agotado'
-                    WHEN stock_actual <= $7 THEN 'Stock Bajo'
+                    WHEN stock_actual <= $6 THEN 'Stock Bajo'
                     ELSE 'Óptimo'
                 END
-            WHERE id = $8
+            WHERE id = $7
             RETURNING *
-        `, [nombre, categoria_id || null, proveedor_id || null, unidad_medida, precioFinal, ubicacion, stock_minimo || 5, req.params.id]);
+        `, [nombre, categoria_id || null, proveedor_id || null, unidad_medida, ubicacion, stock_minimo || 5, req.params.id]);
 
         if (result.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Producto no encontrado' });
         }
+
+        await client.query('COMMIT');
         registrarAuditoria(db, { usuario_id: req.user.id, accion: 'Editó', entidad: 'Producto', entidad_id: req.params.id, detalle: nombre, ip: req.ip });
         res.json(result.rows[0]);
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error al editar producto:', error);
         res.status(500).json({ error: 'Error al editar el producto' });
+    } finally {
+        client.release();
     }
 });
 
@@ -639,6 +698,70 @@ app.post('/api/usuarios', verifyToken, requireRole('Administrador'), async (req,
         }
         console.error('Error al crear usuario:', error);
         res.status(500).json({ error: 'Error al registrar el usuario' });
+    }
+});
+
+// Editar un usuario existente. No toca la contraseña — eso sigue siendo
+// exclusivo de "Configuración > Cambiar contraseña" (cada quien la suya,
+// verificando la actual). Si en el futuro se necesita que un Administrador
+// pueda resetear la contraseña de otro usuario, sería un endpoint aparte.
+app.put('/api/usuarios/:id', verifyToken, requireRole('Administrador'), async (req, res) => {
+    const { nombre, email, rol, estado } = req.body;
+    const rolesValidos = ['Administrador', 'Vendedor', 'Bodeguero'];
+
+    if (!nombre || !email) {
+        return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
+    }
+    if (rol && !rolesValidos.includes(rol)) {
+        return res.status(400).json({ error: `El rol debe ser uno de: ${rolesValidos.join(', ')}.` });
+    }
+
+    try {
+        const result = await db.query(`
+            UPDATE usuarios
+            SET nombre = $1, email = $2, rol = $3, estado = $4
+            WHERE id = $5
+            RETURNING id, nombre, email, rol, estado
+        `, [nombre, email, rol || 'Bodeguero', estado || 'Activo', req.params.id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        registrarAuditoria(db, { usuario_id: req.user.id, accion: 'Editó', entidad: 'Usuario', entidad_id: req.params.id, detalle: nombre, ip: req.ip });
+        res.json(result.rows[0]);
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'Ya existe un usuario con ese correo.' });
+        }
+        console.error('Error al editar usuario:', error);
+        res.status(500).json({ error: 'Error al editar el usuario' });
+    }
+});
+
+// Eliminar un usuario. Dos protecciones importantes:
+// (1) nadie puede eliminarse a sí mismo mientras tiene la sesión abierta
+//     (evita quedarse sin acceso por accidente, o un ataque que borre la
+//     única cuenta de Administrador activa desde su propia sesión);
+// (2) si el usuario tiene movimientos o registros de auditoría asociados,
+//     la base de datos rechaza el borrado (llave foránea) — se protege el
+//     historial en vez de dejarlo huérfano o con datos inventados.
+app.delete('/api/usuarios/:id', verifyToken, requireRole('Administrador'), async (req, res) => {
+    if (req.params.id === req.user.id) {
+        return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta mientras tienes la sesión iniciada.' });
+    }
+    try {
+        const result = await db.query('DELETE FROM usuarios WHERE id = $1 RETURNING id, nombre', [req.params.id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+        registrarAuditoria(db, { usuario_id: req.user.id, accion: 'Eliminó', entidad: 'Usuario', entidad_id: req.params.id, detalle: result.rows[0].nombre, ip: req.ip });
+        res.json({ mensaje: 'Usuario eliminado correctamente' });
+    } catch (error) {
+        if (error.code === '23503') {
+            return res.status(409).json({ error: 'No se puede eliminar: este usuario tiene movimientos o registros de auditoría asociados.' });
+        }
+        console.error('Error al eliminar usuario:', error);
+        res.status(500).json({ error: 'Error al eliminar el usuario' });
     }
 });
 

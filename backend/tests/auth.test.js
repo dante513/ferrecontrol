@@ -70,7 +70,12 @@ describe('POST /api/auth/login', () => {
     const res = await request(app).post('/api/auth/login').send({ email: 'admin@ferrecontrol.com', password: 'claveCorrecta123' });
 
     expect(res.status).toBe(200);
-    expect(res.body.token).toBeDefined();
+    // El token ya no viaja en el cuerpo de la respuesta — ahora va en una
+    // cookie httpOnly (invisible para JavaScript), así que la verificación
+    // se hace sobre la cabecera Set-Cookie, no sobre res.body.
+    const cookies = res.headers['set-cookie'] || [];
+    expect(cookies.some((c) => c.startsWith('token=') && c.includes('HttpOnly'))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('csrfToken='))).toBe(true);
     expect(res.body.usuario.email).toBe('admin@ferrecontrol.com');
     expect(res.body.usuario.password_hash).toBeUndefined(); // nunca debe salir el hash
   });

@@ -48,6 +48,7 @@ describe('registro automático de auditoría al crear un producto', () => {
     const res = await request(app)
       .post('/api/productos')
       .set('Authorization', `Bearer ${tokenAdmin}`)
+      .set('Cookie', 'csrfToken=test-csrf').set('X-CSRF-Token', 'test-csrf')
       .send({ id: 'FER-020', nombre: 'Nivel de burbuja', precio_venta: 15000 });
 
     expect(res.status).toBe(201);
