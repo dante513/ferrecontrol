@@ -90,7 +90,7 @@ export const Movements = ({ isDarkMode }) => {
 
           <form className="space-y-4" onSubmit={handleRegister}>
             <div>
-              <label htmlFor="mov-product" className="block text-sm font-medium mb-1">Producto</label>
+              <label htmlFor="mov-product" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>Producto</label>
               <select
                 id="mov-product"
                 className={`w-full p-2.5 rounded-lg border outline-none text-sm ${isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-300'}`}
@@ -106,7 +106,7 @@ export const Movements = ({ isDarkMode }) => {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="mov-type" className="block text-sm font-medium mb-1">Tipo</label>
+                <label htmlFor="mov-type" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>Tipo</label>
                 <select
                   id="mov-type"
                   className={`w-full p-2.5 rounded-lg border text-sm ${isDarkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-gray-300'}`}
@@ -118,7 +118,7 @@ export const Movements = ({ isDarkMode }) => {
                 </select>
               </div>
               <div>
-                <label htmlFor="mov-quantity" className="block text-sm font-medium mb-1">Cantidad</label>
+                <label htmlFor="mov-quantity" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>Cantidad</label>
                 <input
                   id="mov-quantity"
                   type="number"
@@ -152,8 +152,8 @@ export const Movements = ({ isDarkMode }) => {
               )}
               {!loading && movements.map((m) => (
                 <tr key={m.id} className={isDarkMode ? 'hover:bg-slate-800/40' : 'hover:bg-gray-50'}>
-                  <td className="px-6 py-4 text-sm font-medium">{new Date(m.fecha_movimiento).toLocaleDateString('es-CO')}</td>
-                  <td className="px-6 py-4 text-sm">{m.producto}</td>
+                  <td className={`px-6 py-4 text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{new Date(m.fecha_movimiento).toLocaleDateString('es-CO')}</td>
+                  <td className={`px-6 py-4 text-sm ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>{m.producto}</td>
                   <td className="px-6 py-4">
                     <span className={`flex items-center gap-1 text-xs font-bold ${m.tipo_movimiento === 'Entrada' ? 'text-green-500' : 'text-red-500'}`}>
                       {m.tipo_movimiento === 'Entrada' ? <ArrowUpRight className="w-3 h-3" aria-hidden="true" /> : <ArrowDownLeft className="w-3 h-3" aria-hidden="true" />}
@@ -163,7 +163,7 @@ export const Movements = ({ isDarkMode }) => {
                   <td className={`px-6 py-4 text-sm font-bold ${m.tipo_movimiento === 'Entrada' ? 'text-green-500' : 'text-red-500'}`}>
                     {m.tipo_movimiento === 'Entrada' ? '+' : '-'}{m.cantidad}
                   </td>
-                  <td className="px-6 py-4 text-sm">{m.usuario || '—'}</td>
+                  <td className={`px-6 py-4 text-sm ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>{m.usuario || '—'}</td>
                 </tr>
               ))}
             </tbody>
