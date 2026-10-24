@@ -439,6 +439,12 @@ app.post('/api/movimientos', verifyToken, async (req, res) => {
     if (!producto_id || !tipo_movimiento || !cantidad) {
         return res.status(400).json({ error: 'Todos los campos son obligatorios' });
     }
+    if (!['Entrada', 'Salida'].includes(tipo_movimiento)) {
+        return res.status(400).json({ error: 'El tipo de movimiento debe ser Entrada o Salida' });
+    }
+    if (!Number.isInteger(Number(cantidad))) {
+        return res.status(400).json({ error: 'La cantidad debe ser un número entero' });
+    }
     if (cantidad <= 0) {
         return res.status(400).json({ error: 'La cantidad debe ser mayor a cero' });
     }
@@ -491,6 +497,9 @@ app.post('/api/movimientos', verifyToken, async (req, res) => {
         res.status(201).json({ mensaje: 'Movimiento procesado con éxito' });
     } catch (error) {
         await client.query('ROLLBACK');
+        if (error.code === '23503') { // llave foránea: el producto no existe
+            return res.status(404).json({ error: 'Producto no encontrado' });
+        }
         console.error('Error al procesar movimiento:', error);
         res.status(500).json({ error: 'Error al procesar el movimiento' });
     } finally {
